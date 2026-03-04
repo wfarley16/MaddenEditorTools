@@ -72,6 +72,34 @@ Bytes 4–7:  Metadata — bit-shift for packing (0x20, 0x40, 0x60, 0x80, 0xa0)
 
 Multiple attributes are bit-packed into single storage words. The shift values in bytes 4–7 control how to extract each sub-field.
 
+#### Field Type Comparison (PC Madden reference)
+
+The PC Madden DB editor ([bep713/madden-db-editor](https://github.com/bep713/madden-db-editor)) uses a simpler flat type enum for its version of the format:
+
+| Value | Type | Notes |
+|-------|------|-------|
+| 0 | STRING | Fixed-length, null-padded |
+| 1 | BINARY | Raw bytes |
+| 2 | SINT | Signed integer, bit-packed |
+| 3 | UINT | Unsigned integer, bit-packed |
+| 4 | FLOAT | Float, bit-packed |
+
+The PS3 format's `0x00d4` / `0x00d8` bitfield variants likely correspond to SINT/UINT variants in this scheme. Exact mapping is TBD.
+
+#### Bit-Packing Algorithm
+
+For numeric fields, both the PC and PS3 formats use the same bit-packing approach (confirmed from bep713 source):
+
+```
+1. Slice the relevant bytes from the record: record[floor(offset/8) .. ceil((bits+offset)/8)]
+2. Convert each byte to an 8-bit array (MSB first)
+3. Concatenate all bits into one flat bit array
+4. Read N bits starting at (offset % 8) within that array
+5. Reconstruct integer value (MSB first)
+```
+
+On write, the inverse: set individual bits in the flat array, then pack back into bytes.
+
 ---
 
 ## Table Reference
@@ -366,6 +394,27 @@ To decode any record, parse in this order:
 4. Parse attribute code table → map codes (e.g. "SPEP") to pedd field indices
 5. Decode player/team records using the pedd map
 ```
+
+---
+
+## CRC Checksums
+
+Based on the PC Madden reference implementation, the format likely uses **CRC-32 big-endian** checksums (polynomial `0x04C11DB7`, same as used in Linux kernel CRC32 BE). The PC format stores:
+
+- A **file-level header CRC** covering the first 20 bytes of the file header
+- A **per-table header CRC** (`headercrc`) covering the table header minus its first and last 4 bytes
+- A **per-table data CRC** (`priorcrc`) — a chained CRC where each table's value covers the *previous* table's data block
+- An **EOF CRC** covering the last table's data block
+
+The final CRC value written is `~crc32_be(0, buffer, len, start)` (bitwise NOT of the result).
+
+> **Note:** Whether the PS3 format uses identical CRC layout and polynomial is unconfirmed. This is a strong candidate to investigate when implementing the writer.
+
+---
+
+## Prior Art
+
+- [bep713/madden-db-editor](https://github.com/bep713/madden-db-editor) — Electron/Vue desktop editor for PC Madden. Different format constants but same binary DB family. Source for the bit-packing algorithm and CRC approach documented above.
 
 ---
 
